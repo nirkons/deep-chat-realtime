@@ -22,6 +22,7 @@ import {
   OpenAIRealtimeButton as OpenAIRealtimeButtonT,
   OpenAIRealtimeInputAudioTranscription,
   OpenAIRealtimeFunctionHandler,
+  OpenAIRealtimeAudioConfig,
   OpenAIRealtimeMethods,
   OpenAIRealtimeConfig,
   OpenAIRealtime,
@@ -100,7 +101,7 @@ export class OpenAIRealtimeIO extends DirectServiceIO {
       realtime.methods = this.generateMethods();
       this.setInputAudioTranscribe(deepChat, realtime.config?.input_audio_transcription);
     }
-    this.rawBody.model ??= 'gpt-4o-realtime-preview-2025-06-03';
+    this.rawBody.model ??= 'gpt-realtime-2';
     this._avatarConfig = OpenAIRealtimeIO.buildAvatarConfig(config);
     this._buttonsConfig = OpenAIRealtimeIO.buildButtonsConfig(config);
     this._avatarEl = OpenAIRealtimeIO.createAvatar(this._avatarConfig);
@@ -200,24 +201,48 @@ export class OpenAIRealtimeIO extends DirectServiceIO {
   }
 
   private async getEphemeralKey(key: string) {
-    // https://platform.openai.com/docs/api-reference/realtime-sessions/create
-    const result = await fetch(`${OPEN_AI_BASE_URL}realtime/sessions`, {
+    // https://platform.openai.com/docs/api-reference/realtime-sessions/create-realtime-client-secret
+    const session = OpenAIRealtimeIO.toSessionConfig(this.rawBody);
+    const result = await fetch(`${OPEN_AI_BASE_URL}realtime/client_secrets`, {
       method: POST,
-      body: STRINGIFY(this.rawBody),
+      body: STRINGIFY({session}),
       headers: {
         [CONTENT_TYPE_H_KEY]: APPLICATION_JSON,
         [AUTHORIZATION_H]: `${BEARER_PREFIX}${key}`,
       },
     });
     const data = await result.json();
-    return data.client_secret.value;
+    return data.value;
+  }
+
+  // converts legacy flat session keys (voice, input_audio_transcription, turn_detection) into the
+  // GA realtime structure where audio settings live under `audio.input` / `audio.output`.
+  // GA-shaped configs (already using `audio.input` / `audio.output`) pass through; nested values win
+  // over legacy flat keys when both are provided.
+  // https://platform.openai.com/docs/api-reference/realtime_client_events/session/update
+  private static toSessionConfig(rawBody: Record<string, unknown>) {
+    const {voice, input_audio_transcription, turn_detection, audio, ...rest} = rawBody;
+    const input: Record<string, unknown> = {...((audio as OpenAIRealtimeAudioConfig)?.input || {})};
+    const output: Record<string, unknown> = {...((audio as OpenAIRealtimeAudioConfig)?.output || {})};
+    if (voice !== undefined && output.voice === undefined) output.voice = voice;
+    if (input_audio_transcription !== undefined && input.transcription === undefined) {
+      input.transcription = input_audio_transcription;
+    }
+    if (turn_detection !== undefined && input.turn_detection === undefined) input.turn_detection = turn_detection;
+    const nextAudio: OpenAIRealtimeAudioConfig = {};
+    if (Object.keys(input).length > 0) nextAudio.input = input;
+    if (Object.keys(output).length > 0) nextAudio.output = output;
+    const session: Record<string, unknown> = {type: 'realtime', ...rest};
+    if (nextAudio.input || nextAudio.output) session.audio = nextAudio;
+    return session;
   }
 
   private generateMethods(): OpenAIRealtimeMethods {
     return {
       updateConfig: (config: OpenAIRealtimeConfig) => {
-        // https://platform.openai.com/docs/api-reference/realtime-client-events/session
-        this._dc?.send(STRINGIFY({[TYPE]: 'session.update', session: config}));
+        // https://platform.openai.com/docs/api-reference/realtime_client_events/session/update
+        const session = OpenAIRealtimeIO.toSessionConfig({...config});
+        this._dc?.send(STRINGIFY({[TYPE]: 'session.update', session}));
       },
       sendMessage: (text: string, role?: 'user' | 'assistant' | 'system') => {
         // https://platform.openai.com/docs/api-reference/realtime-client-events/conversation/item/create
@@ -443,9 +468,9 @@ export class OpenAIRealtimeIO extends DirectServiceIO {
         // https://platform.openai.com/docs/guides/realtime-model-capabilities#error-handling
       } else if (response[TYPE] === INVALID_REQUEST_ERROR_PREFIX) {
         this.stopOnError(response.message);
-      } else if (response[TYPE] === 'response.audio_transcript.delta') {
+      } else if (response[TYPE] === 'response.output_audio_transcript.delta') {
         // console.log(response.delta);
-      } else if (response[TYPE] === 'response.audio_transcript.done') {
+      } else if (response[TYPE] === 'response.output_audio_transcript.done') {
         if (response.transcript) {
           FireEvents.onMessage(this._deepChat, {[ROLE]: AI, [TEXT]: response.transcript}, false);
         }
@@ -462,7 +487,7 @@ export class OpenAIRealtimeIO extends DirectServiceIO {
       if (peerConnection !== this._pc) return; // prevent using stale pc when user spams toggle button
       await this._pc.setLocalDescription(offer);
       if (peerConnection !== this._pc) return; // prevent using stale pc when user spams toggle button
-      const sdpResponse = await fetch(`${OPEN_AI_BASE_URL}realtime`, {
+      const sdpResponse = await fetch(`${OPEN_AI_BASE_URL}realtime/calls`, {
         method: POST,
         body: offer.sdp,
         headers: {

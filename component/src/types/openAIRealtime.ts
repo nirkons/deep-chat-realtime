@@ -11,25 +11,45 @@ export type OpenAIRealtimeInputAudioTranscription = {
   prompt?: string;
 };
 
-// https://platform.openai.com/docs/api-reference/realtime-sessions/create
+// https://platform.openai.com/docs/api-reference/realtime-sessions/create-realtime-client-secret
+export type OpenAIRealtimeTurnDetection = {
+  type?: string;
+  threshold?: number;
+  prefix_padding_ms?: number;
+  silence_duration_ms?: number;
+};
+
+export type OpenAIRealtimeAudioConfig = {
+  input?: {
+    transcription?: true | OpenAIRealtimeInputAudioTranscription;
+    turn_detection?: OpenAIRealtimeTurnDetection;
+    format?: object;
+    [key: string]: unknown;
+  };
+  output?: {
+    voice?: string;
+    format?: object;
+    [key: string]: unknown;
+  };
+};
+
 export type OpenAIRealtimeConfig = {
   model?: string;
   instructions?: string;
+  // legacy flat keys (translated to the GA `audio.input` / `audio.output` structure at send time)
   voice?: string;
+  turn_detection?: OpenAIRealtimeTurnDetection;
+  input_audio_transcription?: true | OpenAIRealtimeInputAudioTranscription;
+  // GA nested audio config
+  audio?: OpenAIRealtimeAudioConfig;
   temperature?: number;
   max_response_output_tokens?: number | 'inf';
-  turn_detection?: {
-    type?: string;
-    threshold?: number;
-    prefix_padding_ms?: number;
-    silence_duration_ms?: number;
-  };
-  input_audio_transcription?: true | OpenAIRealtimeInputAudioTranscription;
   tools?: {
-    type: 'function' | 'code_interpreter' | 'file_search';
+    type: string;
     name?: string;
     description?: string;
     parameters?: object;
+    [key: string]: unknown;
   }[];
   tool_choice?: string;
   function_handler?: OpenAIRealtimeFunctionHandler;
