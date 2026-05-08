@@ -452,14 +452,19 @@ export class OpenAIRealtimeIO extends DirectServiceIO {
         this._deepChat.dispatchEvent(new CustomEvent(SPEECH_SESSION_STARTED));
         this.hideLoading();
       } else if (response[TYPE] === 'response.done') {
+        // The GA realtime model (gpt-realtime / gpt-realtime-2) returns audio transcript
+        // and function_call as sibling items in response.output. Iterate so we don't miss
+        // a function_call that lands at index 1+ behind an audio item.
         const message = JSON.parse(e.data);
-        const output = message.response.output?.[0];
-        if (output?.[TYPE] === FUNCTION_CALL) {
-          const {name, call_id} = output;
-          try {
-            await this.handleTool(name, output.arguments, call_id);
-          } catch (e) {
-            this.stopOnError(e as string);
+        const outputs = message.response.output ?? [];
+        for (const output of outputs) {
+          if (output?.[TYPE] === FUNCTION_CALL) {
+            const {name, call_id} = output;
+            try {
+              await this.handleTool(name, output.arguments, call_id);
+            } catch (e) {
+              this.stopOnError(e as string);
+            }
           }
         }
         // https://platform.openai.com/docs/api-reference/realtime-server-events/error
