@@ -1,4 +1,4 @@
-import {DeepChat as DeepChatCore} from 'deep-chat';
+import {DeepChat as DeepChatCore} from 'deep-chat-realtime-fork';
 import {createComponent} from '@lit/react';
 import * as React from 'react';
 
